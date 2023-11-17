@@ -1,0 +1,299 @@
+pool:
+  name: Ansible-Terraform Pool
+  #vmImage: 'ubuntu-latest'
+
+parameters:
+- name: parameter1
+  displayName: Account Name
+  values:
+  - SupportTeam
+  - CRB-ModelReview
+  - DataSharedServices
+  - DataDev
+  - DataSharedServices-Dev
+  - DataStaging
+  - DataTest
+  - DBDev
+  - DBqa
+  - DBUat
+  - SRESharedServices
+  - Stg
+- name: parameter2
+  displayName: Instance Name
+  type: string
+- name: domain_name
+  displayName: Domain To Join
+  values:
+  - CRB.LOCAL
+  - CRBCLOUD.COM
+- name: parameter3
+  displayName: Image
+  values:
+  - Amazon Linux 2
+  - Ubuntu 22.04 LTS
+  - Windows Server 2022
+  - Windows Server 2019
+- name: parameter4
+  displayName: Instance Type
+  values:
+  - CPU:2 RAM:8
+  - CPU:4 RAM:16
+  - CPU:8 RAM:32
+  - CPU:16 RAM:64
+
+variables:
+- group: EC2-Instance-Creation-Automation
+- name: InstanceType
+  ${{ if eq( parameters['parameter4'], 'CPU:2 RAM:8')}}:
+    value: m5.large
+  ${{ if eq( parameters['parameter4'], 'CPU:4 RAM:16')}}:
+    value: m5.xlarge
+  ${{ if eq( parameters['parameter4'], 'CPU:8 RAM:32')}}:
+    value: m5.2xlarge
+  ${{ if eq( parameters['parameter4'], 'CPU:16 RAM:64')}}:
+    value: m5.4xlarge
+- name: AMI
+  ${{ if eq( parameters['parameter3'], 'Amazon Linux 2')}}:
+    value: ami-06a0cd9728546d178
+  ${{ if eq( parameters['parameter3'], 'Ubuntu 22.04 LTS')}}:
+    value: ami-053b0d53c279acc90
+  ${{ if eq( parameters['parameter3'], 'Windows Server 2022')}}:
+    value: ami-0fc682b2a42e57ca2
+  ${{ if eq( parameters['parameter3'], 'Windows Server 2019')}}:
+    value: ami-0ea6a9ded5194e937
+- name: KeyPair
+  value: EC2-Pipeline-${{ parameters.parameter1 }}
+- name: GetPass
+  ${{ if eq( parameters['parameter3'], 'Amazon Linux 2')}}:
+    value: false
+  ${{ if eq( parameters['parameter3'], 'Ubuntu 22.04 LTS')}}:
+    value: false
+  ${{ if eq( parameters['parameter3'], 'Windows Server 2022')}}:
+    value: true
+  ${{ if eq( parameters['parameter3'], 'Windows Server 2019')}}:
+    value: true
+- name: accountID
+  ${{ if eq( parameters['parameter1'], 'SupportTeam')}}:
+    value: 791312296643
+  ${{ if eq( parameters['parameter1'], 'CRB-ModelReview')}}:
+    value: 582373274033
+  ${{ if eq( parameters['parameter1'], 'DataSharedServices')}}:
+    value: 986861736443
+  ${{ if eq( parameters['parameter1'], 'DataDev')}}:
+    value: 014323261062 
+  ${{ if eq( parameters['parameter1'], 'DataSharedServices-Dev')}}:
+    value: 131259557709
+  ${{ if eq( parameters['parameter1'], 'DataStaging')}}:
+    value: 768891556477
+  ${{ if eq( parameters['parameter1'], 'DataTest')}}:
+    value: 138104847783
+  ${{ if eq( parameters['parameter1'], 'DBDev')}}:
+    value: 783294087636
+  ${{ if eq( parameters['parameter1'], 'DBqa')}}:
+    value: 038447433323
+  ${{ if eq( parameters['parameter1'], 'DBUat')}}:
+    value: 569780933303
+  ${{ if eq( parameters['parameter1'], 'SRESharedServices')}}:
+    value: 736727668773
+  ${{ if eq( parameters['parameter1'], 'Stg')}}:
+    value: 880671631492
+- name: playbook
+  ${{ if eq( parameters['parameter3'], 'Amazon Linux 2')}}:
+    value: Linux.ansible.yml
+  ${{ if eq( parameters['parameter3'], 'Ubuntu 22.04 LTS')}}:
+    value: Ubuntu.ansible.yaml
+- name: admin_user
+  ${{ if eq( parameters['parameter3'], 'Amazon Linux 2')}}:
+    value: ec2-user
+  ${{ if eq( parameters['parameter3'], 'Ubuntu 22.04 LTS')}}:
+    value: ubuntu
+- name: distinguishedname
+  ${{ if eq( parameters['domain_name'], 'CRB.LOCAL')}}:
+    value: OU=Dev,OU=CRB Servers,DC=crb,DC=local
+  ${{ if eq( parameters['domain_name'], 'CRBCLOUD.COM')}}:
+    value: OU=Servers,OU=Dev machines,OU=Dev,DC=crbcloud,DC=com
+- name: domain_join_user
+  ${{ if eq( parameters['domain_name'], 'CRB.LOCAL')}}:
+    value: svcEC2Creation
+  ${{ if eq( parameters['domain_name'], 'CRBCLOUD.COM')}}:
+    value: svcEC2Creation
+- name: domain_user_pass
+  ${{ if eq( parameters['domain_name'], 'CRB.LOCAL')}}:
+    value: $(crblocal_user)
+  ${{ if eq( parameters['domain_name'], 'CRBCLOUD.COM')}}:
+    value: $(crbcloud_user)
+
+
+
+
+stages:
+  - stage:
+    jobs:
+      - job: EC2InstanceDeployment
+        continueOnError: 'false'
+        steps:
+          - task: Powershell@2
+            displayName: 'editing tfvars file'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $filePath = "$(System.DefaultWorkingDirectory)/TerraformFolder/accounts-tfvars/${{ lower(parameters.parameter1) }}.tfvars"
+                $content = get-content -path $filePath
+                if($content -match '${{ parameters.parameter2}}')
+                {
+                  throw "Server name already taken"
+                }
+                else
+                {
+                $newBlock = @'
+                ${{ parameters.parameter1 }}-${{ parameters.parameter2}} = {
+                "InstanceName" = "${{ parameters.parameter2}}"
+                "Instance_type" = "${{variables.InstanceType}}"
+                "AMI" = "${{variables.AMI}}"
+                },
+                '@
+                  $index = $content.IndexOf("Configuration = {") + 1
+                  $content = $content[0..($index - 1)] + $newBlock + $content[$index..($content.Length - 1)]
+                  $content | Out-File -FilePath $filePath -Encoding UTF8 -Force
+                }
+
+          - task: Powershell@2
+            displayName: 'Push changes to repository'
+            inputs:
+              targetType: 'inline'
+              script: |
+                git config --global user.email "noreply@example.com"
+                git config --global user.name "EC2 Creation User"
+                git checkout -b main
+                git add "$(System.DefaultWorkingDirectory)/TerraformFolder/accounts-tfvars/${{ lower(parameters.parameter1) }}.tfvars"
+                git commit -m "Add new block to terraform.tfvars"
+                git push https://$(System.AccessToken)@dev.azure.com/crossriverbank/Infrastructure/_git/EC2%20Instance%20Creation HEAD:main
+
+          - task: DownloadSecureFile@1
+            displayName: 'Download KeyPair'
+            inputs:
+              secureFile: '${{variables.KeyPair}}'
+
+          - task: TerraformTaskV4@4
+            displayName: Terraform init
+            inputs:
+              provider: 'aws'
+              command: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/TerraformFolder'
+              backendServiceAWS: 'EC2-Instance-Creation'
+              backendAWSBucketName: 'terraform-statefiles-bucket-infrastructure'
+              backendAWSKey: 'EC2-Instance-Creation/ec2creation.tfstate'
+              environmentServiceNameAWS: 'EC2-Instance-Creation'
+
+          - task: TerraformTaskV4@0
+            displayName: Terraform apply
+            inputs:
+              provider: 'aws'
+              command: 'apply'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/TerraformFolder'
+              commandOptions: '-var temp_directory="$(Agent.TempDirectory)" -var working_directory="$(System.DefaultWorkingDirectory)" -var KeyPair=${{variables.KeyPair}} -var getpass=${{variables.GetPass}} -var iam_role=Infrastructure-IAM-Role-${{ lower(parameters.parameter1) }} -var accountID=${{variables.accountID}} -var InstanceName="${{ parameters.parameter1 }}-${{ parameters.parameter2 }}" -var-file="$(System.DefaultWorkingDirectory)/TerraformFolder/accounts-tfvars/${{ lower(parameters.parameter1) }}.tfvars"'
+              environmentServiceNameAWS: 'EC2-Instance-Creation'
+          
+          - task: terraform-outputs@0
+            inputs:
+              workingDirectory: '$(System.DefaultWorkingDirectory)/TerraformFolder'
+              setPipelineVariables: true
+              maskOutputVariables: true
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                chmod 600 $(Agent.TempDirectory)/${{variables.KeyPair}}
+                sleep 20
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                sleep 90
+            condition: or(eq( '${{ parameters.parameter3 }}', 'Windows Server 2022'), eq( '${{ parameters.parameter3 }}', 'Windows Server 2019'))
+
+          - task: Ansible@0
+            inputs:
+              ansibleInterface: 'agentMachine'
+              playbookPathOnAgentMachine: '${{variables.playbook}}'
+              inventoriesAgentMachine: 'hostList'
+              inventoryHostListAgentMachine: '$(PrivateIP)'
+              sudoEnabled: true
+              sudoUser: 'root'
+              args: >
+                --key-file $(Agent.TempDirectory)/${{variables.KeyPair}}
+                -e 
+                "instancename=${{parameters.parameter2}}.${{parameters.domain_name}}
+                domain_user_pass=${{variables.domain_user_pass}}
+                distinguishedname='${{variables.distinguishedname}}'
+                domain_join_user=${{variables.domain_join_user}}
+                domain_name=${{parameters.domain_name}}
+                crbadmin_public_ssh_key='$(crbadmin_public_ssh_key)'
+                ansible_user=${{variables.admin_user}}
+                working_directory=$(System.DefaultWorkingDirectory)
+                ansible_winrm_server_cert_validation=ignore
+                ansible_python_warning=ignore"
+            retryCountOnTaskFailure: 5
+            displayName: 'Run Linux Playbook'
+            condition: or(eq( '${{ parameters.parameter3 }}', 'Amazon Linux 2'), eq( '${{ parameters.parameter3 }}', 'Ubuntu 22.04 LTS'))
+
+          #CIS changes
+          - task: Ansible@0
+            inputs:
+              ansibleInterface: 'agentMachine'
+              playbookPathOnAgentMachine: 'LinuxCISchanges.yml'
+              inventoriesAgentMachine: 'hostList'
+              inventoryHostListAgentMachine: '$(PrivateIP)'
+              sudoEnabled: true
+              sudoUser: 'root'
+              args: >
+                --key-file $(Agent.TempDirectory)/${{variables.KeyPair}}
+                -e
+                "ansible_user=ec2-user
+                 ansible_winrm_server_cert_validation=ignore
+                 ansible_python_warning=ignore"
+            displayName: 'Run CIS configuration'
+            condition: eq( '${{ parameters.parameter3 }}', 'Amazon Linux 2')
+
+          #ansible task for windows machines
+          - task: Ansible@0
+            inputs:
+              ansibleInterface: 'agentMachine'
+              playbookPathOnAgentMachine: 'Windows.Ansible.yml'
+              inventoriesAgentMachine: 'hostList'
+              inventoryHostListAgentMachine: '$(PrivateIP)'
+              args: >
+                -vvvvv
+                -e 'instancename=${{parameters.parameter2}}
+                    domain_user_pass=${{variables.domain_user_pass}}
+                    distinguishedname="${{variables.distinguishedname}}"
+                    domain_join_user=${{variables.domain_join_user}}
+                    domain_name=${{ lower(parameters.domain_name) }}
+                    ansible_user=administrator
+                    ansible_password=$(AdminPass)
+                    ansible_connection=winrm
+                    ansible_winrm_server_cert_validation=ignore
+                    ansible_winrm_transport=ntlm
+                    ansible_port=5986
+                    ansible_python_warning=ignore'
+              sudoEnabled: true
+            retryCountOnTaskFailure: 5
+            displayName: 'Run Windows Playbook'
+            condition: or(eq( '${{ parameters.parameter3 }}', 'Windows Server 2022'), eq( '${{ parameters.parameter3 }}', 'Windows Server 2019'))
+
+
+ 
+          # - task: TerraformTaskV4@4
+          #   inputs:
+          #     provider: 'aws'
+          #     command: 'custom'
+          #     customCommand: 'force-unlock'
+          #     workingDirectory: '$(System.DefaultWorkingDirectory)/TerraformFolder'
+          #     backendServiceAWS: 'EC2-Instance-Creation'
+          #     backendAWSBucketName: 'terraform-statefiles-bucket-infrastructure'
+          #     backendAWSKey: 'EC2-Instance-Creation/ec2creation.tfstate'
+          #     commandOptions: '-force d4b15192-2de8-3bc7-ab67-80bab09ae72a'
+          #     outputTo: 'console'
+          #     environmentServiceNameAWS: 'EC2-Instance-Creation'
