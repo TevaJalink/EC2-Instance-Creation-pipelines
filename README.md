@@ -1,4 +1,3 @@
-The EC2 instance creation pipline repo contains the code for the migration of personal user machines from on-prem to AWS EC2.
-By simplifing the process, both helpdesk teams and engineering teams are able to use the pipeline to migrate users machine to AWS:
-1. helpdesk teams - are able to manually migrate the users over by schedualing a migration date and running the pipeline by injecting simple input variable.
-2. engineering teams - were given a PAT token with sufficiant credentials to invoke the pipeline using ADO API.
+The EC2 instance creation pipline repo contains the code for the deployment of AWS EC2 instances using our up to date security standards and RBAC Modules.
+By simplifing the process of EC2 deployments we were able to mitigate the critical security issues of delegating the creation to less security aware personal while still delivering the simplicity of cloud infrastructure.
+The pipeline allows users to manully create a EC2 instance for testing purposes and to redeploy the instance when need via in a push of a button.
