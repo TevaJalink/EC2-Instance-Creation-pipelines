@@ -1,7 +1,3 @@
-pool:
-  name: Ansible-Terraform Pool
-  #vmImage: 'ubuntu-latest'
-
 parameters:
 - name: parameter1
   displayName: Account Name
@@ -18,6 +14,7 @@ parameters:
   - DBUat
   - SRESharedServices
   - Stg
+  - Monitoring
 - name: parameter2
   displayName: Instance Name
   type: string
@@ -58,9 +55,9 @@ variables:
   ${{ if eq( parameters['parameter3'], 'Ubuntu 22.04 LTS')}}:
     value: ami-053b0d53c279acc90
   ${{ if eq( parameters['parameter3'], 'Windows Server 2022')}}:
-    value: ami-0fc682b2a42e57ca2
+    value: ami-0cd601a22ac9e6d79
   ${{ if eq( parameters['parameter3'], 'Windows Server 2019')}}:
-    value: ami-0ea6a9ded5194e937
+    value: ami-093693792d26e4373
 - name: KeyPair
   value: EC2-Pipeline-${{ parameters.parameter1 }}
 - name: GetPass
@@ -97,6 +94,8 @@ variables:
     value: 736727668773
   ${{ if eq( parameters['parameter1'], 'Stg')}}:
     value: 880671631492
+  ${{ if eq( parameters['parameter1'], 'Monitoring')}}:
+    value: 545276316638
 - name: playbook
   ${{ if eq( parameters['parameter3'], 'Amazon Linux 2')}}:
     value: Linux.ansible.yml
@@ -129,8 +128,22 @@ variables:
 stages:
   - stage:
     jobs:
+      - job: provision_ECS_Container
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AWSCLI@1
+            inputs:
+              awsCredentials: 'CVM-LVM-ECS-Creation'
+              regionName: 'us-east-1'
+              awsCommand: 'ecs'
+              awsSubCommand: 'run-task'
+              awsArguments: '--cluster infrastructure_prod_cluster --launch-type FARGATE --network-configuration awsvpcConfiguration={subnets=["subnet-0d50e287ffa2ac044","subnet-09ff541150c0b2116"],securityGroups=["sg-07105dcf7df6466f8","sg-09fabacb8a80555ad","sg-0f635e54a71fddcf9"],assignPublicIp="DISABLED"} --task-definition Azure-Pipeline-Agent:27 --count 1'
+
       - job: EC2InstanceDeployment
+        pool: 'Ansible-Terraform Pool'
         continueOnError: 'false'
+        dependsOn: provision_ECS_Container
         steps:
           - task: Powershell@2
             displayName: 'editing tfvars file'
@@ -282,18 +295,3 @@ stages:
             retryCountOnTaskFailure: 5
             displayName: 'Run Windows Playbook'
             condition: or(eq( '${{ parameters.parameter3 }}', 'Windows Server 2022'), eq( '${{ parameters.parameter3 }}', 'Windows Server 2019'))
-
-
- 
-          # - task: TerraformTaskV4@4
-          #   inputs:
-          #     provider: 'aws'
-          #     command: 'custom'
-          #     customCommand: 'force-unlock'
-          #     workingDirectory: '$(System.DefaultWorkingDirectory)/TerraformFolder'
-          #     backendServiceAWS: 'EC2-Instance-Creation'
-          #     backendAWSBucketName: 'terraform-statefiles-bucket-infrastructure'
-          #     backendAWSKey: 'EC2-Instance-Creation/ec2creation.tfstate'
-          #     commandOptions: '-force d4b15192-2de8-3bc7-ab67-80bab09ae72a'
-          #     outputTo: 'console'
-          #     environmentServiceNameAWS: 'EC2-Instance-Creation'
